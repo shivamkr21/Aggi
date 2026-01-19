@@ -24,7 +24,7 @@ for op in ("do_rg", "do_g", "do_k", "do_sc", "do_scn"):
 #End - For invalid color operator warning supression
 
 def generate_Id(types):
-    return f"{types}_{uuid.uuid1().hex[:16]}"
+    return f"{types}_{uuid.uuid1().hex[:17]}"
 
 def get_Time():
     now = datetime.now()
