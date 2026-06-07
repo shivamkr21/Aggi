@@ -1,3 +1,11 @@
+import sys
+from pathlib import Path
+
+# Att2_EmbeddingModel.py lives in S2_OT_Embedding; make it importable here so
+# both indexing (Step2) and querying (Step4) embed text with the exact same
+# model and pooling logic, keeping query and document vectors in one space.
+sys.path.append(str(Path(__file__).resolve().parent.parent / "S2_OT_Embedding"))
+
 import chromadb
 from Att2_EmbeddingModel import embed_text
 

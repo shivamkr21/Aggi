@@ -11,6 +11,12 @@ __pycache__/
 #Sample Text File Exclusion
 Sample_Test_*.txt
 
+#Embedding Model Exclusion
+S2_OT_Embedding/EmbeddingModel/
+
+#Virtual Environment Exclusion
+myvenv/
+
 # C extensions
 *.so
 
