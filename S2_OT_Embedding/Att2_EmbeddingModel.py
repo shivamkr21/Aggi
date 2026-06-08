@@ -1,21 +1,25 @@
+from pathlib import Path
+
 from transformers import AutoTokenizer, AutoModel
 import torch
 import numpy as np
 
-#MODEL_PATH = "./EmbeddingModel/SapBERT-from-PubMedBERT-fulltext"
-MODEL_PATH = "./EmbeddingModel/all-mpnet-base-v2"
+# Anchored on this file's location (not the working directory) so the model
+# loads correctly whether this module is run directly or imported from
+# elsewhere (e.g. S3_User_query).
+MODEL_PATH = Path(__file__).resolve().parent / "EmbeddingModel" / "SapBERT-from-PubMedBERT-fulltext"
+#MODEL_PATH = Path(__file__).resolve().parent / "EmbeddingModel" / "all-mpnet-base-v2"
 
 tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
 model = AutoModel.from_pretrained(MODEL_PATH)
 model.eval()
 
 
-def mean_pooling(model_output, attention_mask):
-    token_embeddings = model_output.last_hidden_state
-    input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
-    return torch.sum(token_embeddings * input_mask_expanded, 1) / torch.clamp(
-        input_mask_expanded.sum(1), min=1e-9
-    )
+def cls_pooling(model_output):
+    # SapBERT (a bare PubMedBERT encoder, not a sentence-transformers model)
+    # is trained and intended to be used via its [CLS] token representation --
+    # the first token of the last hidden state -- rather than mean pooling.
+    return model_output.last_hidden_state[:, 0, :]
 
 
 def embed_text(text: str):
@@ -30,7 +34,7 @@ def embed_text(text: str):
     with torch.no_grad():
         outputs = model(**inputs)
 
-    embedding = mean_pooling(outputs, inputs["attention_mask"])
+    embedding = cls_pooling(outputs)
     vec = embedding[0].numpy()
     vec = vec / np.linalg.norm(vec)
     return vec
