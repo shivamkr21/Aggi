@@ -3,16 +3,15 @@ __pycache__/
 *.py[codz]
 *$py.class
 
-#PDF Exclusion
-*.PDF
-*.Pdf
-*.pdf
-
-#Sample Text File Exclusion
-Sample_Test_*.txt
+#DB Exclusion
+AI/
 
 #Embedding Model Exclusion
 S2_OT_Embedding/EmbeddingModel/
+
+#PDF and Chunk Exclusion
+S1_OT_Chunking/PDF/
+S1_OT_Chunking/Hierarchy Chunks/
 
 #Virtual Environment Exclusion
 myvenv/

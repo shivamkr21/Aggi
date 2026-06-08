@@ -3,9 +3,9 @@ import re
 import json
 from collections import Counter
 
-PDF_PATH = "./PDF/Harrison_CH_1_12.pdf"
-OUTPUT_PATH = "Sample_Test_Hierarchical_Chunks.json"
-BOOK_ID = "HARRISON_CH_1_12"
+PDF_PATH = "./PDF/Harrison_PT20.pdf"
+OUTPUT_PATH = "P20_Hierarchical_Chunks.json"
+BOOK_ID = "HARRISON_PT20"
 
 MIN_PARAGRAPH_CHARS = 80
 TOPIC_GLYPH = "■"

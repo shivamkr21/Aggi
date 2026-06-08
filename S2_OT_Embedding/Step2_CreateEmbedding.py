@@ -4,7 +4,7 @@ import chromadb
 
 from Att2_EmbeddingModel import embed_text
 
-CHUNKS_PATH = "../S1_OT_Chunking/Sample_Test_Hierarchical_Chunks.json"
+CHUNKS_PATH = "../S1_OT_Chunking/P3_Hierarchical_Chunks.json"
 
 chroma_client = chromadb.PersistentClient(
     path=r"C:\Aggi\AI\chroma_db"

@@ -24,17 +24,19 @@ def QueryVector(query: str, topK: int):
         n_results = topK
     )
 
-    print("Query:", query)
-    print("\nTop results:\n")
+#    print("Query:", query)
+#    print("\nTop results:\n")
 
-    documents = results["documents"][0]
-    distances = results["distances"][0]
+#    documents = results["documents"][0]
+#    distances = results["distances"][0]
+#
+#    for rank, (doc, dist) in enumerate(zip(documents, distances), start=1):
+#        print(f"Rank {rank}")
+#        similarity = (1 - dist) * 100
+#        similarity = round(similarity, 2)
+#        similarity = str(similarity)
+#        print("Match: " + similarity + "%")
+#        print(doc)
+#        print("-" * 40)
 
-    for rank, (doc, dist) in enumerate(zip(documents, distances), start=1):
-        print(f"Rank {rank}")
-        similarity = (1 - dist) * 100
-        similarity = round(similarity, 2)
-        similarity = str(similarity)
-        print("Match: " + similarity + "%")
-        print(doc)
-        print("-" * 40)
+    return results
