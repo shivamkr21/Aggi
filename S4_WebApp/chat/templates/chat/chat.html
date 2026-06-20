@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Medical RAG Assistant</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+            background: #f4f6f8;
+            margin: 0;
+            display: flex;
+            justify-content: center;
+        }
+        .app {
+            width: 100%;
+            max-width: 760px;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            background: #fff;
+            box-shadow: 0 0 16px rgba(0,0,0,0.06);
+        }
+        header {
+            padding: 16px 20px;
+            border-bottom: 1px solid #e5e7eb;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        header h1 {
+            font-size: 18px;
+            margin: 0;
+        }
+        header p {
+            margin: 2px 0 0;
+            font-size: 12px;
+            color: #6b7280;
+        }
+        header form button {
+            background: #fff;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            padding: 6px 12px;
+            font-size: 13px;
+            cursor: pointer;
+            color: #374151;
+        }
+        header form button:hover { background: #f3f4f6; }
+
+        .messages {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+        .empty-state {
+            margin: auto;
+            text-align: center;
+            color: #9ca3af;
+            font-size: 14px;
+            max-width: 360px;
+        }
+        .bubble {
+            max-width: 80%;
+            padding: 10px 14px;
+            border-radius: 12px;
+            line-height: 1.45;
+            font-size: 14px;
+            white-space: pre-wrap;
+        }
+        .bubble.user {
+            align-self: flex-end;
+            background: #2563eb;
+            color: #fff;
+            border-bottom-right-radius: 2px;
+        }
+        .bubble.assistant {
+            align-self: flex-start;
+            background: #f3f4f6;
+            color: #111827;
+            border-bottom-left-radius: 2px;
+        }
+        .role-label {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            margin-bottom: 4px;
+            opacity: 0.65;
+        }
+
+        form.ask-form {
+            display: flex;
+            gap: 10px;
+            padding: 16px 20px;
+            border-top: 1px solid #e5e7eb;
+        }
+        form.ask-form input[type="text"] {
+            flex: 1;
+            padding: 10px 14px;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+        form.ask-form input[type="text"]:focus {
+            outline: none;
+            border-color: #2563eb;
+        }
+        form.ask-form button {
+            background: #2563eb;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            padding: 10px 20px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        form.ask-form button:hover { background: #1d4ed8; }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <header>
+            <div>
+                <h1>Medical RAG Assistant</h1>
+                <p>Answers are grounded in BRS Pathology &amp; Harrison's Internal Medicine</p>
+            </div>
+            <form action="{% url 'new_conversation' %}" method="post">
+                {% csrf_token %}
+                <button type="submit">New conversation</button>
+            </form>
+        </header>
+
+        <div class="messages">
+            {% if not messages %}
+                <div class="empty-state">
+                    Ask a question about pathology or internal medicine to get started.
+                    Answers are generated only from the source textbooks, with follow-up
+                    questions remembered within this conversation.
+                </div>
+            {% endif %}
+            {% for message in messages %}
+                <div class="bubble {{ message.role }}">
+                    <div class="role-label">{{ message.get_role_display }}</div>
+                    {{ message.content }}
+                </div>
+            {% endfor %}
+        </div>
+
+        <form class="ask-form" action="{% url 'ask' %}" method="post">
+            {% csrf_token %}
+            <input type="text" name="query" placeholder="Ask a question..." autocomplete="off" autofocus required>
+            <button type="submit">Send</button>
+        </form>
+    </div>
+</body>
+</html>
