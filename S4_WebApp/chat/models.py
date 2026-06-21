@@ -1,30 +1,37 @@
+from django.contrib.auth.models import User
 from django.db import models
 
 
-class Conversation(models.Model):
-    """A single chat thread. This is the 'memory' container -- every message
-    that belongs to a conversation is stored here so we can rebuild the
-    back-and-forth and hand it back to the LLM as context on the next turn."""
-
-    session_key = models.CharField(max_length=40, db_index=True)
-    created_at = models.DateTimeField(auto_now_add=True)
+class UserProfile(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="profile")
+    position = models.CharField(max_length=50, default="User")
 
     def __str__(self):
-        return f"Conversation #{self.pk} ({self.created_at:%Y-%m-%d %H:%M})"
+        return f"{self.user.username} — {self.position}"
+
+
+class Conversation(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="conversations")
+    title = models.CharField(max_length=100, default="New Chat")
+    is_deleted = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-updated_at"]
+
+    def __str__(self):
+        return f"{self.user.username} — {self.title}"
 
 
 class Message(models.Model):
-    """One turn in a conversation -- either the user's question or the
-    assistant's answer. Stored in order so the conversation can be replayed
-    both to the screen (chat history) and to the LLM (conversation memory)."""
-
-    ROLE_CHOICES = [
-        ("user", "User"),
-        ("assistant", "Assistant"),
-    ]
+    ROLE_CHOICES = [("user", "User"), ("assistant", "Assistant")]
+    SOURCE_CHOICES = [("medical", "Medical Reference"), ("conversational", "Conversational")]
 
     conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name="messages")
     role = models.CharField(max_length=10, choices=ROLE_CHOICES)
+    source = models.CharField(max_length=15, choices=SOURCE_CHOICES, null=True, blank=True)
+    citations = models.JSONField(null=True, blank=True)
     content = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
 

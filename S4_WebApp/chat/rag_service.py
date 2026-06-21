@@ -19,7 +19,7 @@ for folder in ("S2_OT_Embedding", "S3_User_Query"):
     if path not in sys.path:
         sys.path.append(path)
 
-from Step6_GenerateAnswer import generate_answer  # noqa: E402
+from Step6_GenerateAnswer import generate_answer, generate_answer_stream  # noqa: E402
 
 # How many prior turns (user+assistant pairs) to replay back to the LLM as
 # conversation memory. Kept small on purpose -- every turn we resend eats
@@ -39,3 +39,8 @@ def build_history(messages):
 def answer_question(query, history_messages):
     history = build_history(history_messages)
     return generate_answer(query, history=history)
+
+
+def answer_question_stream(query, history_messages):
+    history = build_history(history_messages)
+    yield from generate_answer_stream(query, history=history)

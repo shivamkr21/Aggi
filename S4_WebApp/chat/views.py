@@ -1,55 +1,186 @@
+import json
+
+from django.contrib.auth import authenticate, login, logout
+from django.contrib.auth.decorators import login_required
+from django.contrib.auth.models import User
+from django.db.models import Count
+from django.http import StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
-from .models import Conversation, Message
-from .rag_service import answer_question
+from .models import Conversation, Message, UserProfile
+from .rag_service import answer_question, answer_question_stream
 
 
-def _get_or_create_conversation(request):
-    """Each browser session gets its own conversation thread -- this is the
-    'memory container'. No login system for this basic version, so the
-    Django session key is what ties a visitor back to their conversation."""
-    if not request.session.session_key:
-        request.session.create()
-    session_key = request.session.session_key
+def login_view(request):
+    if request.user.is_authenticated:
+        return redirect("chat_home")
+    error = None
+    if request.method == "POST":
+        username = request.POST.get("username", "").strip()
+        password = request.POST.get("password", "")
+        user = authenticate(request, username=username, password=password)
+        if user:
+            login(request, user)
+            return redirect("chat_home")
+        error = "Invalid username or password."
+    return render(request, "chat/login.html", {"error": error})
 
-    conversation = Conversation.objects.filter(session_key=session_key).order_by("-created_at").first()
-    if conversation is None:
-        conversation = Conversation.objects.create(session_key=session_key)
 
-    return conversation
+def logout_view(request):
+    logout(request)
+    return redirect("login")
 
 
-def chat_view(request):
-    conversation = _get_or_create_conversation(request)
+def register_view(request):
+    if request.user.is_authenticated:
+        return redirect("chat_home")
+    error = None
+    if request.method == "POST":
+        username = request.POST.get("username", "").strip()
+        password = request.POST.get("password", "")
+        password2 = request.POST.get("password2", "")
+        if not username or not password:
+            error = "Username and password are required."
+        elif password != password2:
+            error = "Passwords do not match."
+        elif User.objects.filter(username=username).exists():
+            error = "Username already taken."
+        else:
+            user = User.objects.create_user(username=username, password=password)
+            UserProfile.objects.create(user=user)
+            login(request, user)
+            return redirect("chat_home")
+    return render(request, "chat/register.html", {"error": error})
+
+
+@login_required
+def chat_home(request):
+    conv = Conversation.objects.filter(user=request.user, is_deleted=False).first()
+    if not conv:
+        conv = Conversation.objects.create(user=request.user)
+    return redirect("chat", conversation_id=conv.id)
+
+
+@login_required
+def chat_view(request, conversation_id):
+    # If the conversation doesn't exist, belongs to another user, or has been
+    # soft-deleted, redirect home rather than showing a raw 404 page.
+    try:
+        conversation = Conversation.objects.get(id=conversation_id, user=request.user, is_deleted=False)
+    except Conversation.DoesNotExist:
+        return redirect("chat_home")
+    conversations = Conversation.objects.filter(user=request.user, is_deleted=False)
     messages = conversation.messages.all()
-    return render(request, "chat/chat.html", {"messages": messages})
+    return render(request, "chat/chat.html", {
+        "conversation": conversation,
+        "conversations": conversations,
+        "messages": messages,
+    })
 
 
+@login_required
 @require_POST
-def ask_view(request):
-    conversation = _get_or_create_conversation(request)
+def ask_view(request, conversation_id):
+    try:
+        conversation = Conversation.objects.get(id=conversation_id, user=request.user, is_deleted=False)
+    except Conversation.DoesNotExist:
+        return redirect("chat_home")
 
     query = request.POST.get("query", "").strip()
-    if query:
-        # Snapshot the history *before* adding this turn, so the new
-        # question isn't redundantly replayed back to the model as its own
-        # "memory".
-        history_messages = list(conversation.messages.all())
+    if not query:
+        return redirect("chat", conversation_id=conversation_id)
 
-        Message.objects.create(conversation=conversation, role="user", content=query)
-        answer = answer_question(query, history_messages)
-        Message.objects.create(conversation=conversation, role="assistant", content=answer)
+    history_messages = list(conversation.messages.all())
+    Message.objects.create(conversation=conversation, role="user", content=query)
 
-    return redirect("chat")
+    is_first_message = not history_messages
+    if is_first_message:
+        conversation.title = query[:80]
+    conversation.save()
+
+    full_response = []
+    response_source = ["conversational"]
+    captured_citations = [None]
+
+    def sse_generator():
+        try:
+            for event in answer_question_stream(query, history_messages):
+                if event["type"] == "citations":
+                    response_source[0] = "medical"
+                    captured_citations[0] = event["content"]
+                elif event["type"] == "token":
+                    full_response.append(event["content"])
+                elif event["type"] == "done":
+                    complete = "".join(full_response).strip()
+                    Message.objects.create(
+                        conversation=conversation,
+                        role="assistant",
+                        source=response_source[0],
+                        citations=captured_citations[0],
+                        content=complete,
+                    )
+                    conversation.save()
+                    if is_first_message:
+                        yield f"data: {json.dumps({'type': 'title', 'content': conversation.title})}\n\n"
+                elif event["type"] == "error":
+                    error_text = event["content"]
+                    Message.objects.create(
+                        conversation=conversation,
+                        role="assistant",
+                        source=None,
+                        content=error_text,
+                    )
+                    conversation.save()
+
+                yield f"data: {json.dumps(event)}\n\n"
+
+        except Exception:
+            error_event = {"type": "error", "content": "Something went wrong. Please try again."}
+            yield f"data: {json.dumps(error_event)}\n\n"
+
+    response = StreamingHttpResponse(sse_generator(), content_type="text/event-stream")
+    response["Cache-Control"] = "no-cache"
+    response["X-Accel-Buffering"] = "no"
+    return response
 
 
+@login_required
 @require_POST
 def new_conversation_view(request):
-    """Start a fresh thread -- clears memory by simply pointing the session
-    at a brand-new Conversation row; old ones stay in the DB untouched."""
-    if not request.session.session_key:
-        request.session.create()
+    # If an empty conversation already exists, navigate to it instead of
+    # creating another blank one.
+    empty = (
+        Conversation.objects
+        .annotate(msg_count=Count("messages"))
+        .filter(user=request.user, is_deleted=False, msg_count=0, title="New Chat")
+        .first()
+    )
+    if empty:
+        return redirect("chat", conversation_id=empty.id)
+    conv = Conversation.objects.create(user=request.user)
+    return redirect("chat", conversation_id=conv.id)
 
-    Conversation.objects.create(session_key=request.session.session_key)
-    return redirect("chat")
+
+@login_required
+@require_POST
+def rename_conversation_view(request, conversation_id):
+    conversation = get_object_or_404(Conversation, id=conversation_id, user=request.user)
+    new_title = request.POST.get("title", "").strip()
+    if new_title:
+        conversation.title = new_title[:80]
+        conversation.save(update_fields=["title"])
+    return redirect("chat", conversation_id=conversation_id)
+
+
+@login_required
+@require_POST
+def delete_conversation_view(request, conversation_id):
+    conv = get_object_or_404(Conversation, id=conversation_id, user=request.user)
+    # Soft delete — hide from UI but keep in DB so it remains traceable.
+    conv.is_deleted = True
+    conv.save(update_fields=["is_deleted"])
+    remaining = Conversation.objects.filter(user=request.user, is_deleted=False).first()
+    if not remaining:
+        remaining = Conversation.objects.create(user=request.user)
+    return redirect("chat", conversation_id=remaining.id)

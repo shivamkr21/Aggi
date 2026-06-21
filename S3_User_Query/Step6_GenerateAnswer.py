@@ -25,7 +25,20 @@ GEN_MODEL = "gpt-4o-mini"
 #                            this many to the LLM, to bound token cost/context
 #                            dilution and let rank do the final quality call.
 FETCH_K = 20              # wider net -- gives MMR more to work with
-SIMILARITY_THRESHOLD = 58.0
+SIMILARITY_THRESHOLD = 57.0   # lowered from 58: the "Types of necrosis" chunk
+                               # (coagulative/liquefactive/caseous list) scored
+                               # 57.92 and was being cut by the old 58.0 floor.
+MIN_CHUNKS = 2                 # minimum chunks needed to even consider RAG mode
+MIN_TOP_SCORE = 62.5           # Path 1 — strong single match: top chunk ≥ this
+                               # AND at least MIN_CHUNKS found → Medical mode.
+COLLECTIVE_SCORE = 60.0        # Path 2 — collective signal: if at least
+COLLECTIVE_COUNT = 3           # COLLECTIVE_COUNT chunks each individually score
+                               # ≥ COLLECTIVE_SCORE, the corpus covers the topic
+                               # even without a dominant single chunk → Medical.
+                               # "Hi There" has only 1 chunk ≥ 60% (62.04%),
+                               # so it doesn't trigger this path. A genuine
+                               # medical query with 7 moderate chunks would have
+                               # 3+ above 60% and correctly goes Medical.
 PROMPT_CAP = 5
 
 SYSTEM_PROMPT = (
@@ -35,9 +48,47 @@ SYSTEM_PROMPT = (
     "instead of guessing."
 )
 
+CONVERSATIONAL_SYSTEM_PROMPT = (
+    "You are a friendly medical assistant chatbot named Aggi. "
+    "Your answers are grounded in verified medical sources. "
+    "Respond naturally to greetings and general questions. "
+    "If asked what you can do, explain that you answer medical questions based "
+    "on verified medical sources. Keep responses short and friendly. "
+    "Do not answer specific medical questions from memory -- politely let the "
+    "user know those will be answered from the verified medical sources when they ask one."
+)
+
 # Reads the key from the environment so it never lives in source/ git history --
 # set OPENAI_API_KEY as a system/user environment variable before running this.
 client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+
+
+def is_medical_mode(chunks) -> bool:
+    """Decide whether to use RAG (Medical Reference) or Conversational mode.
+
+    Path 1 — strong single match:
+        Top chunk ≥ 62.5% AND at least 2 chunks found.
+        The 62.5% threshold sits in the 0.8% gap between the highest observed
+        non-medical top score (62.04% — "Hi There") and the lowest genuine
+        medical top score (62.86% — MI symptoms).
+
+    Path 2 — collective signal:
+        At least 3 chunks each individually scoring ≥ 60%.
+        Handles queries where the corpus clearly covers the topic but no single
+        chunk dominates (e.g. 7 chunks at 58-61%). Using a COUNT of chunks
+        above 60% (not just the top score) prevents "Hi There" from triggering
+        this path -- it only has 1 chunk above 60% (62.04%), while a genuine
+        medical query with collective coverage would have 3+.
+    """
+    if not chunks:
+        return False
+    top_score = max(sim for _, _, sim in chunks)
+    if top_score >= MIN_TOP_SCORE and len(chunks) >= MIN_CHUNKS:
+        return True
+    chunks_above_collective = sum(1 for _, _, sim in chunks if sim >= COLLECTIVE_SCORE)
+    if chunks_above_collective >= COLLECTIVE_COUNT:
+        return True
+    return False
 
 
 def select_chunks(results, threshold: float = SIMILARITY_THRESHOLD, cap: int = PROMPT_CAP):
@@ -96,25 +147,67 @@ def generate_answer(query: str, fetch_k: int = FETCH_K, history: list | None = N
     results = QueryVector(query, fetch_k)
     chunks = select_chunks(results)
 
-    if not chunks:
-        return (
-            "I couldn't find sufficiently relevant material in the source "
-            "textbooks to answer this question."
-        )
+    if not is_medical_mode(chunks):
+        messages = [{"role": "system", "content": CONVERSATIONAL_SYSTEM_PROMPT}]
+        if history:
+            messages.extend(history)
+        messages.append({"role": "user", "content": query})
+        response = client.chat.completions.create(model=GEN_MODEL, messages=messages)
+        return response.choices[0].message.content
 
     user_prompt = build_prompt(query, chunks)
-
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     if history:
         messages.extend(history)
     messages.append({"role": "user", "content": user_prompt})
-
-    response = client.chat.completions.create(
-        model=GEN_MODEL,
-        messages=messages,
-    )
-
+    response = client.chat.completions.create(model=GEN_MODEL, messages=messages)
     return response.choices[0].message.content
+
+
+def generate_answer_stream(query: str, fetch_k: int = FETCH_K, history: list | None = None):
+    """Streaming version of generate_answer.
+
+    Yields dicts: {"type": "citations"|"token"|"done"|"error", "content": ...}
+
+    The caller (Django view) serialises each dict as an SSE event and flushes
+    it to the browser immediately so the user sees tokens as they arrive.
+    Citations are sent as a single event before the first token so the UI can
+    render the source list independently of the answer text.
+    """
+    try:
+        results = QueryVector(query, fetch_k)
+        chunks = select_chunks(results)
+
+        if not is_medical_mode(chunks):
+            messages = [{"role": "system", "content": CONVERSATIONAL_SYSTEM_PROMPT}]
+            if history:
+                messages.extend(history)
+            messages.append({"role": "user", "content": query})
+        else:
+            # Send citation trails before the first token
+            citations = [
+                f"[{meta['book_id']}] {meta['chapter_title']} > "
+                f"{meta['topic_title']} > {meta['subtopic_title']} (page {meta['page']})"
+                for _, meta, _ in chunks
+            ]
+            yield {"type": "citations", "content": citations}
+
+            user_prompt = build_prompt(query, chunks)
+            messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+            if history:
+                messages.extend(history)
+            messages.append({"role": "user", "content": user_prompt})
+
+        stream = client.chat.completions.create(model=GEN_MODEL, messages=messages, stream=True)
+        for chunk in stream:
+            delta = chunk.choices[0].delta.content
+            if delta:
+                yield {"type": "token", "content": delta}
+
+        yield {"type": "done", "content": ""}
+
+    except Exception as e:
+        yield {"type": "error", "content": "Something went wrong. Please try again."}
 
 
 def main():
