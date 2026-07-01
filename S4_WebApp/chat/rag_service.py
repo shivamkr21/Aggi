@@ -19,7 +19,7 @@ for folder in ("S2_OT_Embedding", "S3_User_Query"):
     if path not in sys.path:
         sys.path.append(path)
 
-from Step6_GenerateAnswer import generate_answer, generate_answer_stream  # noqa: E402
+from Step6_GenerateAnswer import generate_answer, generate_answer_stream, rewrite_query  # noqa: E402
 
 # How many prior turns (user+assistant pairs) to replay back to the LLM as
 # conversation memory. Kept small on purpose -- every turn we resend eats
@@ -36,11 +36,19 @@ def build_history(messages):
     return [{"role": m.role, "content": m.content} for m in recent]
 
 
+def get_retrieval_query(query, history_messages):
+    """Rewrite a follow-up query into a standalone question for ChromaDB.
+    Returns the rewritten query, or the original if no history exists or
+    the query is already self-contained."""
+    history = build_history(history_messages)
+    return rewrite_query(query, history)
+
+
 def answer_question(query, history_messages):
     history = build_history(history_messages)
     return generate_answer(query, history=history)
 
 
-def answer_question_stream(query, history_messages):
+def answer_question_stream(query, retrieval_query, history_messages):
     history = build_history(history_messages)
-    yield from generate_answer_stream(query, history=history)
+    yield from generate_answer_stream(query, retrieval_query=retrieval_query, history=history)

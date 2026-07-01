@@ -42,10 +42,13 @@ COLLECTIVE_COUNT = 3           # COLLECTIVE_COUNT chunks each individually score
 PROMPT_CAP = 5
 
 SYSTEM_PROMPT = (
-    "You are a medical assistant answering questions from a textbook excerpt. "
-    "Answer the question using ONLY the context provided below -- do not rely on "
-    "outside knowledge. If the context does not contain the answer, say so plainly "
-    "instead of guessing."
+    "You are a medical assistant. Answer the user's query using the context "
+    "provided below, which contains excerpts from verified medical textbooks. "
+    "Synthesise relevant information from the context to address the query — "
+    "even if the context does not answer it exactly, use what is relevant to "
+    "provide a useful clinical response. "
+    "Do not rely on outside knowledge beyond what is in the provided context. "
+    "If the context is completely unrelated to the query, say so briefly."
 )
 
 CONVERSATIONAL_SYSTEM_PROMPT = (
@@ -61,6 +64,50 @@ CONVERSATIONAL_SYSTEM_PROMPT = (
 # Reads the key from the environment so it never lives in source/ git history --
 # set OPENAI_API_KEY as a system/user environment variable before running this.
 client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+
+
+REWRITE_SYSTEM_PROMPT = (
+    "You are a query rewriting assistant for a medical AI. "
+    "Given a conversation history and a follow-up question, rewrite the follow-up "
+    "into a single standalone medical question that can be understood without the "
+    "conversation history and also fix obvious spelling mistakes in medical terms. "
+    "If the follow-up is unrelated to the conversation history and is a medical term "
+    "or condition, treat it as a new topic and rewrite it as a complete standalone medical question. "
+    "If the follow-up uses conversational phrasing like 'What do you know about X', "
+    "'Tell me about X', or 'What can you tell me about X', rephrase it into a direct "
+    "clinical question such as 'What is X and what are its symptoms, causes, and treatment?'. "
+    "If the follow-up is a greeting, casual phrase, or non-medical statement "
+    "(e.g. 'Hi', 'Hello', 'Thank you', 'Hi Buddy'), return it unchanged. "
+    "If the follow-up is already self-contained, return it "
+    "unchanged. Output ONLY the rewritten question — no explanation, no punctuation "
+    "changes, nothing else."
+)
+
+
+def rewrite_query(query: str, history: list) -> str:
+    """Rewrite and spell-correct a query for ChromaDB retrieval.
+
+    Handles three cases:
+    - Spelling correction: 'colilithiasis' → 'cholelithiasis'
+    - Context-aware follow-ups: 'symptoms' → 'What are the symptoms of cholelithiasis?'
+    - New unrelated topic: 'Paragangliomas' → 'What are paragangliomas and how are they treated?'
+
+    Runs on every query including first messages (no early return for empty history)
+    so spelling correction always applies.
+    """
+    messages = [
+        {"role": "system", "content": REWRITE_SYSTEM_PROMPT},
+        *history[-4:],   # last 2 exchanges for context
+        {"role": "user", "content": f"Follow-up: {query}"},
+    ]
+
+    response = client.chat.completions.create(
+        model=GEN_MODEL,
+        messages=messages,
+        max_tokens=80,
+        temperature=0,
+    )
+    return response.choices[0].message.content.strip()
 
 
 def is_medical_mode(chunks) -> bool:
@@ -164,18 +211,22 @@ def generate_answer(query: str, fetch_k: int = FETCH_K, history: list | None = N
     return response.choices[0].message.content
 
 
-def generate_answer_stream(query: str, fetch_k: int = FETCH_K, history: list | None = None):
+def generate_answer_stream(query: str, retrieval_query: str | None = None,
+                           fetch_k: int = FETCH_K, history: list | None = None):
     """Streaming version of generate_answer.
 
-    Yields dicts: {"type": "citations"|"token"|"done"|"error", "content": ...}
+    `query`          — the original user text; used for the LLM prompt so the
+                       answer reads naturally relative to what the user typed.
+    `retrieval_query`— the rewritten standalone question used for ChromaDB
+                       retrieval.  If None, falls back to `query`.  Passing a
+                       rewritten version fixes context-blind follow-ups like
+                       'symptoms' → 'What are the symptoms of cholelithiasis?'
 
-    The caller (Django view) serialises each dict as an SSE event and flushes
-    it to the browser immediately so the user sees tokens as they arrive.
-    Citations are sent as a single event before the first token so the UI can
-    render the source list independently of the answer text.
+    Yields dicts: {"type": "citations"|"token"|"done"|"error", "content": ...}
     """
     try:
-        results = QueryVector(query, fetch_k)
+        rq = retrieval_query or query
+        results = QueryVector(rq, fetch_k)
         chunks = select_chunks(results)
 
         if not is_medical_mode(chunks):

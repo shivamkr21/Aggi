@@ -9,7 +9,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
 from .models import Conversation, Message, UserProfile
-from .rag_service import answer_question, answer_question_stream
+from .rag_service import answer_question, answer_question_stream, get_retrieval_query
 
 
 def login_view(request):
@@ -92,7 +92,18 @@ def ask_view(request, conversation_id):
         return redirect("chat", conversation_id=conversation_id)
 
     history_messages = list(conversation.messages.all())
-    Message.objects.create(conversation=conversation, role="user", content=query)
+
+    # Rewrite follow-up queries into standalone questions for ChromaDB retrieval.
+    # The original query is preserved in the DB for comparison; the rewritten
+    # version is stored in rewritten_query so both are visible in the admin.
+    retrieval_query = get_retrieval_query(query, history_messages)
+
+    Message.objects.create(
+        conversation=conversation,
+        role="user",
+        content=query,
+        rewritten_query=retrieval_query if retrieval_query != query else None,
+    )
 
     is_first_message = not history_messages
     if is_first_message:
@@ -105,7 +116,7 @@ def ask_view(request, conversation_id):
 
     def sse_generator():
         try:
-            for event in answer_question_stream(query, history_messages):
+            for event in answer_question_stream(query, retrieval_query, history_messages):
                 if event["type"] == "citations":
                     response_source[0] = "medical"
                     captured_citations[0] = event["content"]

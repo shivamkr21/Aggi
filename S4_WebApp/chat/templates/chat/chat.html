@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <title>{{ conversation.title }} — Aggi: Medical AI</title>
     <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -262,6 +263,16 @@
         .message-row.user      .bubble { background: #2563eb; color: #fff; border-bottom-right-radius: 4px; }
         .message-row.assistant .bubble { background: #fff; color: #1e293b; border: 1px solid #e2e8f0; border-bottom-left-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
 
+        /* Markdown rendered inside bubbles */
+        .bubble p { margin: 0 0 6px; line-height: 1.55; }
+        .bubble p:last-child { margin-bottom: 0; }
+        .bubble ol, .bubble ul { margin: 4px 0; padding-left: 20px; }
+        .bubble li { margin: 3px 0; line-height: 1.55; }
+        .bubble li p { margin: 0; }
+        .bubble li > ul, .bubble li > ol { margin: 2px 0; }
+        .bubble strong { font-weight: 600; }
+        .bubble h1, .bubble h2, .bubble h3 { font-size: inherit; font-weight: 700; margin: 8px 0 3px; }
+
         /* Loading dots */
         .loading-dots { display: inline-flex; gap: 4px; align-items: center; padding: 4px 0; }
         .loading-dots span {
@@ -362,6 +373,71 @@
             color: #94a3b8;
             margin-top: 8px;
         }
+
+        /* ── Hamburger button (mobile only) ── */
+        .hamburger {
+            display: none;
+            background: transparent;
+            border: none;
+            color: #475569;
+            font-size: 22px;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 6px;
+            line-height: 1;
+            flex-shrink: 0;
+        }
+        .hamburger:hover { background: #f1f5f9; }
+
+        /* ── Sidebar overlay (mobile) ── */
+        .sidebar-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.4);
+            z-index: 99;
+        }
+        .sidebar-overlay.active { display: block; }
+
+        /* ── Responsive ── */
+        @media (max-width: 768px) {
+            body { flex-direction: column; }
+
+            .sidebar {
+                position: fixed;
+                left: -268px;
+                top: 0;
+                height: 100vh;
+                width: 268px;
+                min-width: 268px;
+                z-index: 100;
+                transition: left .25s ease;
+            }
+            .sidebar.open { left: 0; }
+
+            .main { width: 100%; flex: 1; }
+
+            .hamburger { display: flex; align-items: center; }
+
+            .chat-header { padding: 12px 14px; gap: 8px; }
+            .chat-header h2 { font-size: 14px; }
+            .source-tag { display: none; }
+
+            .messages { padding: 16px 0; }
+            .message-row { padding: 4px 12px; }
+            .bubble { max-width: 90%; font-size: 13.5px; padding: 10px 13px; }
+
+            .input-area { padding: 10px 12px 14px; }
+            .input-wrap { padding: 8px 8px 8px 12px; }
+            .input-wrap textarea { font-size: 14px; }
+            .send-btn { width: 36px; height: 36px; font-size: 16px; }
+            .input-hint { display: none; }
+
+            .empty-state { padding: 24px 20px; }
+            .empty-icon { font-size: 36px; }
+            .empty-state h3 { font-size: 16px; }
+            .empty-state p { font-size: 13px; }
+        }
     </style>
 </head>
 <body>
@@ -425,9 +501,13 @@
     </div>
 </aside>
 
+<!-- ── Sidebar overlay (mobile tap-outside to close) ── -->
+<div class="sidebar-overlay" id="sidebar-overlay"></div>
+
 <!-- ── Main ── -->
 <main class="main">
     <div class="chat-header">
+        <button class="hamburger" id="hamburger" aria-label="Open menu">☰</button>
         <h2>{{ conversation.title }}</h2>
         <span class="source-tag">Verified Medical Sources</span>
     </div>
@@ -469,6 +549,18 @@
     const sendBtn = document.getElementById('send-btn');
     const form = document.getElementById('ask-form');
     const userInitial = "{{ request.user.username|first|upper }}";
+
+    // Pre-process markdown to collapse blank lines between list items
+    // so marked.js doesn't create <p> tags inside <li> elements (loose lists)
+    function parseMarkdown(text) {
+        const tight = text.replace(/\n\n([ \t]*[-*+]|\s*\d+\.)/g, '\n$1');
+        return marked.parse(tight);
+    }
+
+    // Render markdown in historical assistant messages
+    document.querySelectorAll('.message-row.assistant .msg-text').forEach(el => {
+        el.innerHTML = parseMarkdown(el.textContent);
+    });
 
     // Auto-scroll to latest message on load
     msgs.scrollTop = msgs.scrollHeight;
@@ -557,6 +649,7 @@
 
         let citations = null;
         let textStarted = false;
+        let fullText = '';
         let buffer = '';
 
         try {
@@ -582,13 +675,17 @@
 
                     if (evt.type === 'token') {
                         if (!textStarted) { dots.remove(); textStarted = true; }
-                        assistantBubble.appendChild(document.createTextNode(evt.content));
+                        fullText += evt.content;
+                        // Show plain text during streaming for speed
+                        assistantBubble.textContent = fullText;
                         msgs.scrollTop = msgs.scrollHeight;
 
                     } else if (evt.type === 'citations') {
                         citations = evt.content;
 
                     } else if (evt.type === 'done') {
+                        // Render full markdown once streaming is complete
+                        assistantBubble.innerHTML = parseMarkdown(fullText);
                         if (citations) showCitations(assistantBubble, citations);
                         msgs.scrollTop = msgs.scrollHeight;
 
@@ -638,6 +735,22 @@
         };
         inputEl.onblur = submit;
     }
+
+    // ── Mobile sidebar toggle ──────────────────────────────────────────────
+    const sidebar  = document.querySelector('.sidebar');
+    const overlay  = document.getElementById('sidebar-overlay');
+    const hamburger = document.getElementById('hamburger');
+
+    function openSidebar()  { sidebar.classList.add('open');    overlay.classList.add('active'); }
+    function closeSidebar() { sidebar.classList.remove('open'); overlay.classList.remove('active'); }
+
+    hamburger.addEventListener('click', openSidebar);
+    overlay.addEventListener('click', closeSidebar);
+
+    // Close sidebar when a conversation link is tapped on mobile
+    document.querySelectorAll('.conv-title').forEach(el => {
+        el.addEventListener('click', closeSidebar);
+    });
 </script>
 </body>
 </html>

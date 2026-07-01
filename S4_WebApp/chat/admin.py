@@ -23,7 +23,7 @@ admin.site.register(User, UserAdmin)
 class MessageInline(admin.TabularInline):
     model = Message
     extra = 0
-    readonly_fields = ("role", "source", "citations", "content", "created_at")
+    readonly_fields = ("role", "source", "rewritten_query", "citations", "content", "created_at")
 
 
 @admin.register(Conversation)
@@ -35,5 +35,5 @@ class ConversationAdmin(admin.ModelAdmin):
 
 @admin.register(Message)
 class MessageAdmin(admin.ModelAdmin):
-    list_display = ("id", "conversation", "role", "source", "created_at")
+    list_display = ("id", "conversation", "role", "source", "rewritten_query", "created_at")
     list_filter = ("role", "source")
