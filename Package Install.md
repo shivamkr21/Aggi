@@ -1,20 +1,22 @@
-<h4>Chunking.py</h4>
-<ul>
-	<li>pip install pdfplumber</li>
-</ul>
-
-<hr>
-
-<h4>Chunking2.py</h4>
-<ul>
-	<li>pip install PyMuPDF</li>
-</ul>
-
-<hr>
-
-<h4>LC Based Files</h4>
-<ul>
-	<li>pip install pdfplumber</li>
-	<li>pip install langchain</li>
-	<li>pip install -U langchain-text-splitters</li>
-</ul>
+chromadb==1.5.9
+Django==5.2.15
+openai==2.41.0
+torch==2.12.0
+transformers==5.10.2
+tokenizers==0.22.2
+safetensors==0.7.0
+huggingface_hub==1.18.0
+langchain==1.3.4
+langchain-core==1.4.1
+langchain-text-splitters==1.1.2
+langgraph==1.2.4
+pdfplumber==0.11.9
+PyPDF2==3.0.1
+PyMuPDF==1.27.2.3
+python-dotenv==1.2.2
+uvicorn==0.49.0
+tqdm==4.68.1
+numpy==2.4.6
+pillow==12.2.0
+requests==2.34.2
+onnxruntime==1.26.0

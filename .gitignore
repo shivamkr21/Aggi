@@ -15,6 +15,8 @@ S1_OT_Chunking/Hierarchy Chunks/
 
 #Virtual Environment Exclusion
 myvenv/
+.claude
+.git
 
 # C extensions
 *.so
