@@ -1,4 +1,6 @@
 import json
+import logging
+import time
 
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
@@ -10,6 +12,8 @@ from django.views.decorators.http import require_POST
 
 from .models import Conversation, Message, UserProfile
 from .rag_service import answer_question, answer_question_stream, get_retrieval_query
+
+logger = logging.getLogger("aggi.request")
 
 
 def login_view(request):
@@ -113,6 +117,7 @@ def ask_view(request, conversation_id):
     full_response = []
     response_source = ["conversational"]
     captured_citations = [None]
+    ask_start = time.monotonic()
 
     def sse_generator():
         try:
@@ -124,12 +129,20 @@ def ask_view(request, conversation_id):
                     full_response.append(event["content"])
                 elif event["type"] == "done":
                     complete = "".join(full_response).strip()
-                    Message.objects.create(
+                    assistant_msg = Message.objects.create(
                         conversation=conversation,
                         role="assistant",
                         source=response_source[0],
                         citations=captured_citations[0],
                         content=complete,
+                    )
+                    duration_ms = round((time.monotonic() - ask_start) * 1000)
+                    logger.info(
+                        "ASK conv=%s msg_id=%s source=%s duration=%dms",
+                        conversation.id,
+                        assistant_msg.id,
+                        response_source[0],
+                        duration_ms,
                     )
                     conversation.save()
                     if is_first_message:
