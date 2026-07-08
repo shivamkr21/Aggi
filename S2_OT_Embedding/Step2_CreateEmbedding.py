@@ -4,8 +4,8 @@ import chromadb
 
 from Att2_EmbeddingModel import embed_text
 
-CHUNKS_DIR  = "../S1_OT_Chunking/Hierarchy Chunks/6 Guyton"
-TOTAL_PARTS = 15
+CHUNKS_DIR  = "../S1_OT_Chunking/Hierarchy Chunks/7 Parson"
+TOTAL_PARTS = 10
 
 chroma_client = chromadb.PersistentClient(
     path=r"C:\Aggi\AI\chroma_db"

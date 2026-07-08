@@ -17,11 +17,18 @@ class RequestLogMiddleware:
             return response
 
         duration_ms = round((time.monotonic() - start) * 1000)
+        ip = (
+            request.META.get("HTTP_X_FORWARDED_FOR", "").split(",")[0].strip()
+            or request.META.get("REMOTE_ADDR", "-")
+        )
+        user = request.user.username if request.user.is_authenticated else "-"
         logger.info(
-            "%s %s %s %dms",
+            "%s %s %s %dms [%s] user=%s",
             request.method,
             request.path,
             response.status_code,
             duration_ms,
+            ip,
+            user,
         )
         return response

@@ -206,7 +206,66 @@
             border-radius: 20px;
             padding: 3px 10px;
             white-space: nowrap;
+            cursor: pointer;
+            transition: background .2s;
+            flex-shrink: 0;
         }
+        .source-tag:hover { background: #dbeafe; }
+
+        /* ── Books Modal ── */
+        .modal-backdrop {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.45);
+            z-index: 200;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-backdrop.active { display: flex; }
+        .modal {
+            background: #fff;
+            border-radius: 14px;
+            padding: 28px;
+            width: 90%;
+            max-width: 540px;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+        }
+        .modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 18px;
+        }
+        .modal-header h3 {
+            font-size: 16px;
+            font-weight: 700;
+            color: #0f172a;
+        }
+        .modal-close {
+            background: transparent;
+            border: none;
+            font-size: 20px;
+            color: #94a3b8;
+            cursor: pointer;
+            padding: 4px;
+            border-radius: 6px;
+            line-height: 1;
+        }
+        .modal-close:hover { color: #475569; background: #f1f5f9; }
+        .book-list { display: flex; flex-direction: column; gap: 10px; }
+        .book-item {
+            padding: 12px 14px;
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            background: #f8fafc;
+        }
+        .book-title { font-size: 14px; font-weight: 600; color: #0f172a; word-break: break-word; white-space: normal; }
+        .book-author { font-size: 12px; color: #64748b; margin-top: 2px; word-break: break-word; white-space: normal; }
+        .book-desc { font-size: 12px; color: #475569; margin-top: 6px; line-height: 1.5; word-break: break-word; white-space: normal; }
+        .no-books { font-size: 13px; color: #94a3b8; text-align: center; padding: 20px 0; }
 
         .messages {
             flex: 1;
@@ -408,7 +467,7 @@
                 position: fixed;
                 left: -268px;
                 top: 0;
-                height: 100vh;
+                height: 100dvh;
                 width: 268px;
                 min-width: 268px;
                 z-index: 100;
@@ -422,7 +481,7 @@
 
             .chat-header { padding: 12px 14px; gap: 8px; }
             .chat-header h2 { font-size: 14px; }
-            .source-tag { display: none; }
+            .source-tag { font-size: 10px; padding: 2px 8px; }
 
             .messages { padding: 16px 0; }
             .message-row { padding: 4px 12px; }
@@ -501,6 +560,27 @@
         </div>
     </div>
 </aside>
+
+<!-- ── Books Modal ── -->
+<div class="modal-backdrop" id="books-modal">
+    <div class="modal">
+        <div class="modal-header">
+            <h3>📚 Verified Medical Sources</h3>
+            <button class="modal-close" id="modal-close">✕</button>
+        </div>
+        <div class="book-list">
+            {% for book in books %}
+            <div class="book-item">
+                <div class="book-title">{{ book.title }}</div>
+                {% if book.author %}<div class="book-author">{{ book.author }}</div>{% endif %}
+                {% if book.description %}<div class="book-desc">{{ book.description }}</div>{% endif %}
+            </div>
+            {% empty %}
+            <div class="no-books">No books listed yet. Add them from the admin panel.</div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
 
 <!-- ── Sidebar overlay (mobile tap-outside to close) ── -->
 <div class="sidebar-overlay" id="sidebar-overlay"></div>
@@ -736,6 +816,17 @@
         };
         inputEl.onblur = submit;
     }
+
+    // ── Books modal ───────────────────────────────────────────────────────
+    const booksModal   = document.getElementById('books-modal');
+    const modalClose   = document.getElementById('modal-close');
+    const sourceTag    = document.querySelector('.source-tag');
+
+    sourceTag.addEventListener('click', () => booksModal.classList.add('active'));
+    modalClose.addEventListener('click', () => booksModal.classList.remove('active'));
+    booksModal.addEventListener('click', e => {
+        if (e.target === booksModal) booksModal.classList.remove('active');
+    });
 
     // ── Mobile sidebar toggle ──────────────────────────────────────────────
     const sidebar  = document.querySelector('.sidebar');

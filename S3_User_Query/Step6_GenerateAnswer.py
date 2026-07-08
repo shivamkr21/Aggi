@@ -243,7 +243,7 @@ def generate_answer_stream(query: str, retrieval_query: str | None = None,
             ]
             yield {"type": "citations", "content": citations}
 
-            user_prompt = build_prompt(query, chunks)
+            user_prompt = build_prompt(rq, chunks)
             messages = [{"role": "system", "content": SYSTEM_PROMPT}]
             if history:
                 messages.extend(history)

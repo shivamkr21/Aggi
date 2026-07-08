@@ -10,7 +10,7 @@ from django.http import StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
-from .models import Conversation, Message, UserProfile
+from .models import Book, Conversation, Message, UserProfile
 from .rag_service import answer_question, answer_question_stream, get_retrieval_query
 
 logger = logging.getLogger("aggi.request")
@@ -26,12 +26,14 @@ def login_view(request):
         user = authenticate(request, username=username, password=password)
         if user:
             login(request, user)
+            logger.info("LOGIN user=%s", username)
             return redirect("chat_home")
         error = "Invalid username or password."
     return render(request, "chat/login.html", {"error": error})
 
 
 def logout_view(request):
+    logger.info("LOGOUT user=%s", request.user.username if request.user.is_authenticated else "-")
     logout(request)
     return redirect("login")
 
@@ -76,10 +78,13 @@ def chat_view(request, conversation_id):
         return redirect("chat_home")
     conversations = Conversation.objects.filter(user=request.user, is_deleted=False)
     messages = conversation.messages.all()
+    books = Book.objects.filter(is_active=True)
+    logger.info("CHAT_OPEN conv=%s user=%s", conversation_id, request.user.username)
     return render(request, "chat/chat.html", {
         "conversation": conversation,
         "conversations": conversations,
         "messages": messages,
+        "books": books,
     })
 
 
@@ -138,9 +143,10 @@ def ask_view(request, conversation_id):
                     )
                     duration_ms = round((time.monotonic() - ask_start) * 1000)
                     logger.info(
-                        "ASK conv=%s msg_id=%s source=%s duration=%dms",
+                        "ASK conv=%s msg_id=%s user=%s source=%s duration=%dms",
                         conversation.id,
                         assistant_msg.id,
+                        request.user.username,
                         response_source[0],
                         duration_ms,
                     )
