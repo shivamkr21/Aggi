@@ -71,6 +71,8 @@ REWRITE_SYSTEM_PROMPT = (
     "Given a conversation history and a follow-up question, rewrite the follow-up "
     "into a single standalone medical question that can be understood without the "
     "conversation history and also fix obvious spelling mistakes in medical terms. "
+    "IMPORTANT: If the follow-up is in any language other than English, translate it "
+    "to English first, then apply all rewriting rules. Always output in English only. "
     "If the follow-up is unrelated to the conversation history and is a medical term "
     "or condition, treat it as a new topic and rewrite it as a complete standalone medical question. "
     "If the follow-up uses conversational phrasing like 'What do you know about X', "
@@ -231,8 +233,8 @@ def generate_answer_stream(query: str, retrieval_query: str | None = None,
 
         if not is_medical_mode(chunks):
             messages = [{"role": "system", "content": CONVERSATIONAL_SYSTEM_PROMPT}]
-            if history:
-                messages.extend(history)
+            # if history:
+            #     messages.extend(history)
             messages.append({"role": "user", "content": query})
         else:
             # Send citation trails before the first token
@@ -245,8 +247,8 @@ def generate_answer_stream(query: str, retrieval_query: str | None = None,
 
             user_prompt = build_prompt(rq, chunks)
             messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-            if history:
-                messages.extend(history)
+            # if history:
+            #     messages.extend(history)
             messages.append({"role": "user", "content": user_prompt})
 
         stream = client.chat.completions.create(model=GEN_MODEL, messages=messages, stream=True)

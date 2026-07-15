@@ -128,7 +128,11 @@ LOGIN_URL = '/login/'
 LOGIN_REDIRECT_URL = '/'
 
 LOG_DIR = os.path.join(BASE_DIR, "Logs")
-os.makedirs(LOG_DIR, exist_ok=True)
+ACCESS_LOG_DIR = os.path.join(LOG_DIR, "access")
+SERVER_LOG_DIR = os.path.join(LOG_DIR, "server")
+ERROR_LOG_DIR  = os.path.join(LOG_DIR, "error")
+for _d in (ACCESS_LOG_DIR, SERVER_LOG_DIR, ERROR_LOG_DIR):
+    os.makedirs(_d, exist_ok=True)
 
 LOGGING = {
     "version": 1,
@@ -139,25 +143,66 @@ LOGGING = {
             "style": "{",
             "datefmt": "%Y-%m-%d %H:%M:%S",
         },
+        "access": {
+            "format": "{asctime} {message}",
+            "style": "{",
+            "datefmt": "%Y-%m-%d %H:%M:%S",
+        },
     },
     "handlers": {
         "console": {
             "class": "logging.StreamHandler",
             "formatter": "standard",
         },
-        "file": {
+        "server_file": {
             "class": "medassist.log_handlers.DatestampedRotatingFileHandler",
-            "filename": os.path.join(LOG_DIR, "server.log"),
-            "maxBytes": 5 * 1024 * 1024,  # 5 MB per file
-            "backupCount": 9999,           # effectively unlimited rotated files
+            "filename": os.path.join(SERVER_LOG_DIR, "server.log"),
+            "maxBytes": 5 * 1024 * 1024,
+            "backupCount": 9999,
+            "formatter": "standard",
+            "encoding": "utf-8",
+        },
+        "access_file": {
+            "class": "medassist.log_handlers.DatestampedRotatingFileHandler",
+            "filename": os.path.join(ACCESS_LOG_DIR, "access.log"),
+            "maxBytes": 5 * 1024 * 1024,
+            "backupCount": 9999,
+            "formatter": "access",
+            "encoding": "utf-8",
+        },
+        "error_file": {
+            "class": "medassist.log_handlers.DatestampedRotatingFileHandler",
+            "filename": os.path.join(ERROR_LOG_DIR, "error.log"),
+            "maxBytes": 5 * 1024 * 1024,
+            "backupCount": 9999,
             "formatter": "standard",
             "encoding": "utf-8",
         },
     },
     "loggers": {
-        "aggi.request": {
-            "handlers": ["console", "file"],
+        "aggi.access": {
+            "handlers": ["access_file"],
             "level": "INFO",
+            "propagate": False,
+        },
+        "aggi.request": {
+            "handlers": ["console", "server_file"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "django.request": {
+            "handlers": ["error_file"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "django.security": {
+            "handlers": ["error_file"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "django.server": {
+            "handlers": ["error_file"],
+            "level": "WARNING",
             "propagate": False,
         },
     },

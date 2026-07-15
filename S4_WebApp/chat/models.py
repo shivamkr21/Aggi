@@ -41,9 +41,11 @@ class Conversation(models.Model):
 class Message(models.Model):
     ROLE_CHOICES = [("user", "User"), ("assistant", "Assistant")]
     SOURCE_CHOICES = [("medical", "Medical Reference"), ("conversational", "Conversational")]
+    STATUS_CHOICES = [("pending", "Pending"), ("complete", "Complete"), ("cancelled", "Cancelled")]
 
     conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name="messages")
     role = models.CharField(max_length=10, choices=ROLE_CHOICES)
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, default="complete")
     source = models.CharField(max_length=15, choices=SOURCE_CHOICES, null=True, blank=True)
     citations = models.JSONField(null=True, blank=True)
     content = models.TextField()

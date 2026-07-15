@@ -1,14 +1,22 @@
 import json
 import logging
+import queue
+import threading
 import time
 
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
+from django.db import connection as db_connection
 from django.db.models import Count
-from django.http import StreamingHttpResponse
+from django.http import JsonResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
+
+# In-memory cancellation signals keyed by conversation_id.
+# Each entry is a threading.Event; worker threads check it between tokens.
+_cancel_events: dict[int, threading.Event] = {}
+_cancel_lock = threading.Lock()
 
 from .models import Book, Conversation, Message, UserProfile
 from .rag_service import answer_question, answer_question_stream, get_retrieval_query
@@ -100,11 +108,8 @@ def ask_view(request, conversation_id):
     if not query:
         return redirect("chat", conversation_id=conversation_id)
 
-    history_messages = list(conversation.messages.all())
+    history_messages = list(conversation.messages.filter(status="complete"))
 
-    # Rewrite follow-up queries into standalone questions for ChromaDB retrieval.
-    # The original query is preserved in the DB for comparison; the rewritten
-    # version is stored in rewritten_query so both are visible in the admin.
     retrieval_query = get_retrieval_query(query, history_messages)
 
     Message.objects.create(
@@ -119,14 +124,36 @@ def ask_view(request, conversation_id):
         conversation.title = query[:80]
     conversation.save()
 
-    full_response = []
-    response_source = ["conversational"]
-    captured_citations = [None]
+    # Pre-create the assistant message as pending so it survives a tab close.
+    assistant_msg = Message.objects.create(
+        conversation=conversation,
+        role="assistant",
+        status="pending",
+        content="",
+    )
+
+    cancel_event = threading.Event()
+    with _cancel_lock:
+        _cancel_events[conversation_id] = cancel_event
+
+    token_queue: queue.Queue = queue.Queue()
+    username = request.user.username
     ask_start = time.monotonic()
 
-    def sse_generator():
+    def llm_worker():
+        full_response = []
+        response_source = ["conversational"]
+        captured_citations = [None]
         try:
             for event in answer_question_stream(query, retrieval_query, history_messages):
+                if cancel_event.is_set():
+                    partial = "".join(full_response).strip()
+                    assistant_msg.content = partial or "[Response stopped]"
+                    assistant_msg.status = "cancelled"
+                    assistant_msg.save(update_fields=["content", "status"])
+                    token_queue.put({"type": "cancelled", "content": ""})
+                    return
+
                 if event["type"] == "citations":
                     response_source[0] = "medical"
                     captured_citations[0] = event["content"]
@@ -134,45 +161,62 @@ def ask_view(request, conversation_id):
                     full_response.append(event["content"])
                 elif event["type"] == "done":
                     complete = "".join(full_response).strip()
-                    assistant_msg = Message.objects.create(
-                        conversation=conversation,
-                        role="assistant",
-                        source=response_source[0],
-                        citations=captured_citations[0],
-                        content=complete,
-                    )
+                    assistant_msg.content = complete
+                    assistant_msg.source = response_source[0]
+                    assistant_msg.citations = captured_citations[0]
+                    assistant_msg.status = "complete"
+                    assistant_msg.save()
                     duration_ms = round((time.monotonic() - ask_start) * 1000)
                     logger.info(
                         "ASK conv=%s msg_id=%s user=%s source=%s duration=%dms",
-                        conversation.id,
-                        assistant_msg.id,
-                        request.user.username,
-                        response_source[0],
-                        duration_ms,
+                        conversation.id, assistant_msg.id, username,
+                        response_source[0], duration_ms,
                     )
                     conversation.save()
                     if is_first_message:
-                        yield f"data: {json.dumps({'type': 'title', 'content': conversation.title})}\n\n"
+                        token_queue.put({"type": "title", "content": conversation.title})
                 elif event["type"] == "error":
-                    error_text = event["content"]
-                    Message.objects.create(
-                        conversation=conversation,
-                        role="assistant",
-                        source=None,
-                        content=error_text,
-                    )
+                    assistant_msg.content = event["content"]
+                    assistant_msg.status = "complete"
+                    assistant_msg.save()
                     conversation.save()
 
-                yield f"data: {json.dumps(event)}\n\n"
+                token_queue.put(event)
 
         except Exception:
-            error_event = {"type": "error", "content": "Something went wrong. Please try again."}
-            yield f"data: {json.dumps(error_event)}\n\n"
+            assistant_msg.status = "complete"
+            assistant_msg.content = "Something went wrong. Please try again."
+            assistant_msg.save(update_fields=["content", "status"])
+            token_queue.put({"type": "error", "content": "Something went wrong. Please try again."})
+        finally:
+            token_queue.put(None)  # sentinel — tells SSE generator to stop
+            with _cancel_lock:
+                _cancel_events.pop(conversation_id, None)
+            db_connection.close()  # release DB connection owned by this thread
 
-    response = StreamingHttpResponse(sse_generator(), content_type="text/event-stream")
-    response["Cache-Control"] = "no-cache"
-    response["X-Accel-Buffering"] = "no"
-    return response
+    threading.Thread(target=llm_worker, daemon=True).start()
+
+    def sse_generator():
+        while True:
+            event = token_queue.get()
+            if event is None:
+                break
+            yield f"data: {json.dumps(event)}\n\n"
+
+    http_response = StreamingHttpResponse(sse_generator(), content_type="text/event-stream")
+    http_response["Cache-Control"] = "no-cache"
+    http_response["X-Accel-Buffering"] = "no"
+    return http_response
+
+
+@login_required
+@require_POST
+def cancel_ask_view(request, conversation_id):
+    with _cancel_lock:
+        event = _cancel_events.get(conversation_id)
+        if event:
+            event.set()
+    return JsonResponse({"status": "ok"})
 
 
 @login_required
